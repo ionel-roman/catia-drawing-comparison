@@ -1,22 +1,16 @@
+import os
 import win32com.client
+import pandas as pd
 
 
-def extract_dimension_parameters():
-    catia = win32com.client.Dispatch("CATIA.Application") #initialize CATIA
-    doc = catia.ActiveDocument # doc is currently opened DRW
+# -----------------------------
+# EXTRACT ONLY LENGTH + ANGLE
+# -----------------------------
+def extract_dimension_parameters(doc):
+    params = doc.Parameters
+    dimensions = []
 
-    if not doc.Name.lower().endswith(".catdrawing"): # check if it really is a DRW
-        print("❌ Not a CATDrawing")
-        return
-
-    params = doc.Parameters # extract all parameters
-
-    print(f"\n✅ Drawing: {doc.Name}")
-    print(f"✅ Total parameters: {params.Count}\n")
-
-    dimensions = {}
-
-    for i in range(1, params.Count + 1):   #Filter only Dimensions from all Parameters, rest is not needed
+    for i in range(1, params.Count + 1):
         p = params.Item(i)
 
         try:
@@ -24,15 +18,13 @@ def extract_dimension_parameters():
         except:
             continue
 
-        # Only dimension-related parameters
         if "Dimension." not in full_name:
             continue
 
-        parts = full_name.split("\\")  #organize dimensions by Sheet, View, Dimension name
+        parts = full_name.split("\\")
 
-        # Extract identifiers
-        sheet_name = parts[1] if len(parts) > 1 else "Unknown"
-        view_name = parts[2] if len(parts) > 2 else "Unknown"
+        sheet = parts[1] if len(parts) > 1 else "Unknown"
+        view = parts[2] if len(parts) > 2 else "Unknown"
 
         dim_id = None
         param_type = None
@@ -44,75 +36,167 @@ def extract_dimension_parameters():
                 param_type = "length"
             elif "Measured angle" in part:
                 param_type = "angle"
-            elif "Activity" in part:
-                param_type = "activity"
 
-        if dim_id is None:
+        # ✅ ignore Activity and everything else
+        if param_type not in ["length", "angle"]:
             continue
 
-        # Create unique key per dimension
-        key = f"{sheet_name} | {view_name} | {dim_id}"
-
-        if key not in dimensions:
-            dimensions[key] = {
-                "sheet": sheet_name,
-                "view": view_name,
-                "dimension": dim_id,
-                "length": None,
-                "angle": None,
-                "activity": None
-            }
-
-        #  Safe value extraction + rounding
         try:
-            raw_value = p.Value
-
-            if isinstance(raw_value, (int, float)):
-                value = f"{float(raw_value):.2f}"   # ✅ FORCE 2 decimals
-            else:
-                value = raw_value
-
+            value = round(float(p.Value), 3)
         except:
-            value = None
+            continue
 
-        # Store values
-        if param_type == "length":
-            dimensions[key]["length"] = value
+        dimensions.append({
+            "sheet": sheet,
+            "view": view,
+            "dimension": dim_id,
+            "value": value,
+            "type": param_type
+        })
 
-        elif param_type == "angle":
-            dimensions[key]["angle"] = value
+    return pd.DataFrame(dimensions)
 
-        elif param_type == "activity":
-            dimensions[key]["activity"] = value
 
-    #  Print results
-    print("📏 Extracted Dimensions:\n")
-    '''
-    for key, data in dimensions.items():
-        print(f"Sheet : {data['sheet']}")
-        print(f"View  : {data['view']}")
-        print(f"Dim   : {data['dimension']}")
-        if data['length']:
-            print(f"  Length : {data['length']}")
-        if data['angle']:
-            print(f"  Angle  : {data['angle']}")
-        print("-" * 40)
-'''
-    return dimensions
+# -----------------------------
+# COMPARE BY SEARCHING VALUES
+# -----------------------------
+def compare_by_value_search(df1, df2, tolerance=0.01):
+    result = []
 
+    grouped1 = df1.groupby(["sheet", "view"])
+    grouped2 = df2.groupby(["sheet", "view"])
+
+    all_keys = set(grouped1.groups.keys()).union(grouped2.groups.keys())
+
+    for key in all_keys:
+        g1 = grouped1.get_group(key) if key in grouped1.groups else pd.DataFrame(columns=df1.columns)
+        g2 = grouped2.get_group(key) if key in grouped2.groups else pd.DataFrame(columns=df2.columns)
+
+        used_in_d2 = set()
+
+        # ✅ LOOP: each dimension in Drawing 1
+        for i, row1 in g1.iterrows():
+
+            found_match = False
+            match_index = None
+
+            for j, row2 in g2.iterrows():
+                if j in used_in_d2:
+                    continue
+
+                if abs(row1["value"] - row2["value"]) <= tolerance:
+                    found_match = True
+                    match_index = j
+                    break
+
+            if found_match:
+                used_in_d2.add(match_index)
+
+                result.append({
+                    "sheet": key[0],
+                    "view": key[1],
+                    "dimension_D1": row1["dimension"],
+                    "value_D1": row1["value"],
+                    "dimension_D2": g2.loc[match_index, "dimension"],
+                    "value_D2": g2.loc[match_index, "value"],
+                    "difference": round(abs(row1["value"] - g2.loc[match_index, "value"]), 4),
+                    "status": "OK"
+                })
+
+            else:
+                result.append({
+                    "sheet": key[0],
+                    "view": key[1],
+                    "dimension_D1": row1["dimension"],
+                    "value_D1": row1["value"],
+                    "dimension_D2": None,
+                    "value_D2": None,
+                    "difference": None,
+                    "status": "NOT FOUND in D2"
+                })
+
+        # ✅ Remaining values only in Drawing 2
+        for j, row2 in g2.iterrows():
+            if j not in used_in_d2:
+                result.append({
+                    "sheet": key[0],
+                    "view": key[1],
+                    "dimension_D1": None,
+                    "value_D1": None,
+                    "dimension_D2": row2["dimension"],
+                    "value_D2": row2["value"],
+                    "difference": None,
+                    "status": "EXTRA in D2"
+                })
+
+    df = pd.DataFrame(result)
+
+    # Sort nicely
+    df = df.sort_values(by=["sheet", "view", "value_D1"])
+
+    return df
+
+
+# -----------------------------
+# PICK FILES
+# -----------------------------
+def pick_drawings(folder_path):
+    files = [f for f in os.listdir(folder_path) if f.lower().endswith(".catdrawing")]
+
+    if len(files) < 2:
+        print("❌ Not enough files")
+        return None, None
+
+    print("\n📂 Available Drawings:\n")
+    for i, f in enumerate(files):
+        print(f"{i + 1}. {f}")
+
+    try:
+        i1 = int(input("\nSelect first drawing: ")) - 1
+        i2 = int(input("Select second drawing: ")) - 1
+    except:
+        return None, None
+
+    return os.path.join(folder_path, files[i1]), os.path.join(folder_path, files[i2])
+
+
+# -----------------------------
+# MAIN
+# -----------------------------
+def compare_drawings():
+    folder = r"C:\CAx\Usr\uig56981\CatiaV5\B32\WGM_13_0_2_0-AUTO\WISE-PROD\.ws\wise-prod.automotive-wan.com443\MB EAL"   # 🔧 CHANGE HERE
+
+    path1, path2 = pick_drawings(folder)
+    if not path1 or not path2:
+        return
+
+    catia = win32com.client.Dispatch("CATIA.Application")
+    docs = catia.Documents
+
+    print("\n📂 Opening drawings...")
+
+    doc1 = docs.Open(path1)
+    doc2 = docs.Open(path2)
+
+    print(f"\n✅ Comparing:\n- {doc1.Name}\n- {doc2.Name}")
+
+    df1 = extract_dimension_parameters(doc1)
+    df2 = extract_dimension_parameters(doc2)
+
+    if df1.empty or df2.empty:
+        print("❌ No dimensions found")
+        return
+
+    df_result = compare_by_value_search(df1, df2)
+
+    output_path = r"E:\scripts\Catia Drawing Comparison\comparison.xlsx"
+    df_result.to_excel(output_path, index=False)
+
+    print(f"\n✅ Exported to: {output_path}")
+
+
+# -----------------------------
+# RUN
+# -----------------------------
 if __name__ == "__main__":
-    dimensions=extract_dimension_parameters()
-    
-    target_key = "Sheet.1 | Section view B-B | Dimension.2"
-
-    
-    if dimensions and target_key in dimensions:
-        d = dimensions[target_key]
-        
-        print("✅ Found dimension:")
-        print(f"Sheet : {d['sheet']}")
-        print(f"View  : {d['view']}")
-        print(f"Length: {d['length']}")
-        print(f"Angle : {d['angle']}")
-    else:
-        print("❌ Dimension not found")
+    compare_drawings()

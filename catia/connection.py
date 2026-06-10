@@ -1,12 +1,14 @@
 import win32com.client
 
-def get_catia_app():
+def get_catia():
     try:
-        catia = win32com.client.GetActiveObject("CATIA.Application")
-        print("✅ Connected to running CATIA")
-        return catia
+        return win32com.client.Dispatch("CATIA.Application")
     except Exception as e:
-        raise RuntimeError(
-            "❌ CATIA is not running via CAD_Workbench. Start it manually."
-        ) from e
+        raise Exception("Cannot connect to CATIA. Make sure CATIA is running.") from e
 
+
+def open_document(catia, path):
+    try:
+        return catia.Documents.Open(path)
+    except Exception as e:
+        raise Exception(f"Failed to open document:\n{path}") from e

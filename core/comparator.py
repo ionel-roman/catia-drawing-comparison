@@ -32,59 +32,47 @@ def compare_by_value_search(df1, df2, tolerance=0.01):
                 used.add(match_row)
 
                 result.append({
-                    "sheet": key[0],
                     "view": key[1],
 
-                    "dimension_Reference_DRW": row1["dimension"],
-                    "value_Reference_DRW": row1["value"],
-                    "upper_tol_Reference_DRW": row1["upper_tol"],
-                    "lower_tol_Reference_DRW": row1["lower_tol"],
+                    "value_DRW_1": round(row1["value"], 2),
+                    "upper_tol_DRW_1": round(row1["upper_tol"], 2),
+                    "lower_tol_DRW_1": round(row1["lower_tol"], 2),
 
-                    "dimension_Compared_Drawing": g2.loc[match_row, "dimension"],
-                    "value_Compared_Drawing": g2.loc[match_row, "value"],
-                    "upper_tol_Compared_Drawing": g2.loc[match_row, "upper_tol"],
-                    "lower_tol_Compared_Drawing": g2.loc[match_row, "lower_tol"],
+                    "value_DRW_2": round(g2.loc[match_row, "value"], 2),
+                    "upper_tol_DRW_2": round(g2.loc[match_row, "upper_tol"], 2),
+                    "lower_tol_DRW_2": round(g2.loc[match_row, "lower_tol"], 2),
 
-                    "difference": round(abs(row1["value"] - g2.loc[match_row, "value"]), 4),
                     "status": "OK"
                 })
 
             else:
                 result.append({
-                    "sheet": key[0],
                     "view": key[1],
 
-                    "dimension_Reference_DRW": row1["dimension"],
-                    "value_Reference_DRW": row1["value"],
-                    "upper_tol_Reference_DRW": row1["upper_tol"],
-                    "lower_tol_Reference_DRW": row1["lower_tol"],
+                    "value_DRW_1": round(row1["value"], 2),
+                    "upper_tol_DRW_1": round(row1["upper_tol"], 2),
+                    "lower_tol_DRW_1": round(row1["lower_tol"], 2),
 
-                    "dimension_Compared_Drawing": None,
-                    "value_Compared_Drawing": None,
-                    "upper_tol_Compared_Drawing": None,
-                    "lower_tol_Compared_Drawing": None,
+                    "value_DRW_2": None,
+                    "upper_tol_DRW_2": None,
+                    "lower_tol_DRW_2": None,
 
-                    "difference": None,
-                    "status": "NOT FOUND in Compared_Drawing"
+                    "status": "NOT FOUND in DRW_2"
                 })
 
         for j, row2 in g2.iterrows():
             if j not in used:
                 result.append({
-                    "sheet": key[0],
                     "view": key[1],
 
-                    "dimension_Reference_DRW": None,
-                    "value_Reference_DRW": None,
-                    "upper_tol_Reference_DRW": None,
-                    "lower_tol_Reference_DRW": None,
+                    "value_DRW_1": None,
+                    "upper_tol_DRW_1": None,
+                    "lower_tol_DRW_1": None,
 
-                    "dimension_Compared_Drawing": row2["dimension"],
-                    "value_Compared_Drawing": row2["value"],
-                    "upper_tol_Compared_Drawing": row2["upper_tol"],
-                    "lower_tol_Compared_Drawing": row2["lower_tol"],
+                    "value_DRW_2": round(row2["value"], 2),
+                    "upper_tol_DRW_2": round(row2["upper_tol"], 2),
+                    "lower_tol_DRW_2": round(row2["lower_tol"], 2),
 
-                    "difference": None,
                     "status": "EXTRA in Compared_Drawing"
                 })
 

@@ -1,79 +1,74 @@
-import pandas as pd
+from dataclasses import dataclass
+from typing import Optional
+from model.dimension import Dimension
+
+@dataclass
+class ComparisonResult:
+    sheet: str
+    view: str
+    ref_dimension: Optional[Dimension]
+    cmp_dimension: Optional[Dimension]
+    difference: Optional[float]
+    status: str # "OK" | "MISSING" | "EXTRA"
 
 
-def compare_by_value_search(df1, df2, tolerance=0.01):
-    result = []
+class DrawingComparator:
+    def __init__(self, tolerance: float = 0.01):
+        self.tolerance = tolerance
 
-    grouped1 = df1.groupby(["sheet", "view"])
-    grouped2 = df2.groupby(["sheet", "view"])
+    def compare(self,reference: list[Dimension],compared: list[Dimension]) -> list[ComparisonResult]:
+        results = []
+        ref_by_view = self._group_by_view(reference)
+        cmp_by_view = self._group_by_view(compared)
+        all_keys = set(ref_by_view) | set(cmp_by_view)
 
-    keys = set(grouped1.groups.keys()).union(grouped2.groups.keys())
+        for key in all_keys:
+            ref_dims = ref_by_view.get(key, [])
+            cmp_dims = cmp_by_view.get(key, [])
+            results.extend(self._compare_view(key, ref_dims, cmp_dims))
 
-    for key in keys:
-        g1 = grouped1.get_group(key) if key in grouped1.groups else pd.DataFrame(columns=df1.columns)
-        g2 = grouped2.get_group(key) if key in grouped2.groups else pd.DataFrame(columns=df2.columns)
+        return results
 
+    def _group_by_view(self, dims: list[Dimension]) -> dict:
+        grouped = {}
+        for d in dims:
+            key = (d.sheet, d.view)
+            grouped.setdefault(key, []).append(d)
+        return grouped
+
+    def _compare_view(self, key, ref_dims, cmp_dims) -> list[ComparisonResult]:
+        results = []
         used = set()
 
-        for _, row1 in g1.iterrows():
-            found = False
-            match_row = None
-
-            for j, row2 in g2.iterrows():
-                if j in used:
-                    continue
-
-                if abs(row1["value"] - row2["value"]) <= tolerance:
-                    found = True
-                    match_row = j
-                    break
-
-            if found:
-                used.add(match_row)
-
-                result.append({
-                    "view": key[1],
-
-                    "value_DRW_1": round(row1["value"], 2),
-                    "upper_tol_DRW_1": round(row1["upper_tol"], 2),
-                    "lower_tol_DRW_1": round(row1["lower_tol"], 2),
-
-                    "value_DRW_2": round(g2.loc[match_row, "value"], 2),
-                    "upper_tol_DRW_2": round(g2.loc[match_row, "upper_tol"], 2),
-                    "lower_tol_DRW_2": round(g2.loc[match_row, "lower_tol"], 2),
-
-                    "status": "OK"
-                })
-
+        for ref in ref_dims:
+            match = self._find_match(ref, cmp_dims, used)
+            if match:
+                used.add(id(match))
+                results.append(ComparisonResult(
+                sheet=key[0], view=key[1],
+                ref_dimension=ref, cmp_dimension=match,
+                difference=round(abs(ref.value - match.value), 4),
+                status="OK"
+                ))
             else:
-                result.append({
-                    "view": key[1],
+                results.append(ComparisonResult(
+                sheet=key[0], view=key[1],
+                ref_dimension=ref, cmp_dimension=None,
+                difference=None, status="MISSING"
+                ))
 
-                    "value_DRW_1": round(row1["value"], 2),
-                    "upper_tol_DRW_1": round(row1["upper_tol"], 2),
-                    "lower_tol_DRW_1": round(row1["lower_tol"], 2),
+        for cmp in cmp_dims:
+            if id(cmp) not in used:
+                results.append(ComparisonResult(
+                sheet=key[0], view=key[1],
+                ref_dimension=None, cmp_dimension=cmp,
+                difference=None, status="EXTRA"
+                ))
 
-                    "value_DRW_2": None,
-                    "upper_tol_DRW_2": None,
-                    "lower_tol_DRW_2": None,
+        return results
 
-                    "status": "NOT FOUND in DRW_2"
-                })
-
-        for j, row2 in g2.iterrows():
-            if j not in used:
-                result.append({
-                    "view": key[1],
-
-                    "value_DRW_1": None,
-                    "upper_tol_DRW_1": None,
-                    "lower_tol_DRW_1": None,
-
-                    "value_DRW_2": round(row2["value"], 2),
-                    "upper_tol_DRW_2": round(row2["upper_tol"], 2),
-                    "lower_tol_DRW_2": round(row2["lower_tol"], 2),
-
-                    "status": "EXTRA in Compared_Drawing"
-                })
-
-    return pd.DataFrame(result)
+    def _find_match(self, ref, candidates, used):
+        for c in candidates:
+            if id(c) not in used and abs(ref.value - c.value) <= self.tolerance:
+                return c
+        return None
